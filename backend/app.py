@@ -59,6 +59,29 @@ def list_files():
     """업로드된 파일 목록 조회"""
     try:
         files = file_manager.list_files()
+        
+        # 파일명 파싱하여 메타데이터 추가
+        from core.filename_parser import parse_filename
+        for file in files:
+            parsed_info = parse_filename(file["filename"])
+            if parsed_info["parsed"]:
+                file["date"] = parsed_info["date"]
+                file["doc_type"] = parsed_info["doc_type"]
+                file["doc_title"] = parsed_info["doc_title"]
+            else:
+                file["date"] = None
+                file["doc_type"] = None
+                file["doc_title"] = None
+        
+        # 필터링 파라미터 처리
+        doc_type = request.args.get("doc_type")
+        date = request.args.get("date")
+        
+        if doc_type:
+            files = [f for f in files if f.get("doc_type") == doc_type]
+        if date:
+            files = [f for f in files if f.get("date") == date]
+        
         return jsonify({"files": files}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500

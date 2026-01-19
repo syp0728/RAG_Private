@@ -4,7 +4,22 @@ import './FileManager.css'
 function FileManager({ files, onUpload, onDelete, onDownload, backendStatus }) {
   const [uploading, setUploading] = useState(false)
   const [uploadStatus, setUploadStatus] = useState(null)
+  const [filterDocType, setFilterDocType] = useState('')
+  const [filterDate, setFilterDate] = useState('')
   const fileInputRef = useRef(null)
+  
+  // 문서 유형 목록 추출
+  const docTypes = [...new Set(files.map(f => f.doc_type).filter(Boolean))].sort()
+  
+  // 날짜 목록 추출
+  const dates = [...new Set(files.map(f => f.date).filter(Boolean))].sort().reverse()
+  
+  // 필터링된 파일 목록
+  const filteredFiles = files.filter(file => {
+    if (filterDocType && file.doc_type !== filterDocType) return false
+    if (filterDate && file.date !== filterDate) return false
+    return true
+  })
 
   const handleFileSelect = async (e) => {
     const file = e.target.files[0]
@@ -39,6 +54,41 @@ function FileManager({ files, onUpload, onDelete, onDownload, backendStatus }) {
     <div className="file-manager">
       <div className="file-manager-header">
         <h2>파일 관리</h2>
+        <div className="file-filters">
+          <select
+            className="filter-select"
+            value={filterDocType}
+            onChange={(e) => setFilterDocType(e.target.value)}
+          >
+            <option value="">전체 문서 유형</option>
+            {docTypes.map(type => (
+              <option key={type} value={type}>{type}</option>
+            ))}
+          </select>
+          <select
+            className="filter-select"
+            value={filterDate}
+            onChange={(e) => setFilterDate(e.target.value)}
+          >
+            <option value="">전체 날짜</option>
+            {dates.map(date => (
+              <option key={date} value={date}>
+                {date ? `${date.substring(0, 2)}년 ${date.substring(2, 4)}월 ${date.substring(4, 6)}일` : date}
+              </option>
+            ))}
+          </select>
+          {(filterDocType || filterDate) && (
+            <button
+              className="filter-clear"
+              onClick={() => {
+                setFilterDocType('')
+                setFilterDate('')
+              }}
+            >
+              필터 초기화
+            </button>
+          )}
+        </div>
         <div className="upload-section">
           <input
             ref={fileInputRef}
@@ -67,26 +117,43 @@ function FileManager({ files, onUpload, onDelete, onDownload, backendStatus }) {
       </div>
 
       <div className="file-list">
-        {files.length === 0 ? (
+        {filteredFiles.length === 0 ? (
           <div className="file-empty">
-            <p>📄 업로드된 파일이 없습니다.</p>
+            <p>📄 {files.length === 0 ? '업로드된 파일이 없습니다.' : '필터 조건에 맞는 파일이 없습니다.'}</p>
             <p className="file-hint">
-              PDF, DOCX, TXT, MD 형식의 파일을 업로드할 수 있습니다.
+              {files.length === 0 
+                ? 'PDF, DOCX, TXT, MD 형식의 파일을 업로드할 수 있습니다.'
+                : '다른 필터 조건을 선택해보세요.'}
             </p>
           </div>
         ) : (
           <table className="file-table">
             <thead>
               <tr>
-                <th>파일명</th>
+                <th>날짜</th>
+                <th>문서 유형</th>
+                <th>문서 제목</th>
                 <th>크기</th>
                 <th>작업</th>
               </tr>
             </thead>
             <tbody>
-              {files.map((file) => (
+              {filteredFiles.map((file) => (
                 <tr key={file.id}>
-                  <td className="file-name">{file.filename}</td>
+                  <td className="file-date">
+                    {file.date 
+                      ? `${file.date.substring(0, 2)}년 ${file.date.substring(2, 4)}월 ${file.date.substring(4, 6)}일`
+                      : '-'}
+                  </td>
+                  <td className="file-doc-type">{file.doc_type || '-'}</td>
+                  <td className="file-title">
+                    {file.doc_title || file.filename}
+                    {!file.doc_type && (
+                      <span className="file-filename-hint" title={file.filename}>
+                        ({file.filename})
+                      </span>
+                    )}
+                  </td>
                   <td className="file-size">{formatFileSize(file.size)}</td>
                   <td className="file-actions">
                     <button

@@ -8,14 +8,52 @@
 .file-manager-header {
   padding: 2rem;
   border-bottom: 1px solid #e0e0e0;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
 }
 
 .file-manager-header h2 {
-  margin: 0;
+  margin: 0 0 1rem 0;
   color: #333;
+}
+
+.file-filters {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  align-items: center;
+}
+
+.filter-select {
+  padding: 0.5rem 1rem;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  background: white;
+  cursor: pointer;
+}
+
+.filter-select:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+.filter-clear {
+  padding: 0.5rem 1rem;
+  background: #f5f5f5;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background 0.3s;
+}
+
+.filter-clear:hover {
+  background: #e0e0e0;
+}
+
+.upload-section {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
 }
 
 .upload-section {
@@ -130,12 +168,31 @@
   background: #f9f9f9;
 }
 
-.file-name {
+.file-date {
+  color: #666;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.file-doc-type {
+  font-weight: 600;
+  color: #667eea;
+  font-size: 0.9rem;
+}
+
+.file-title {
   font-weight: 500;
   color: #333;
   word-break: break-all;
-  max-width: 500px;
+  max-width: 400px;
   overflow-wrap: break-word;
+}
+
+.file-filename-hint {
+  font-size: 0.85rem;
+  color: #999;
+  font-weight: normal;
+  margin-left: 0.5rem;
 }
 
 .file-size {

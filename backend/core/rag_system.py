@@ -7,6 +7,7 @@ from sentence_transformers import SentenceTransformer
 import ollama
 from config import *
 from .document_processor import DocumentProcessor
+from .filename_parser import parse_filename
 
 class RAGSystem:
     """RAG 시스템 클래스 - 하이브리드 자원 분배"""
@@ -117,6 +118,9 @@ class RAGSystem:
             show_progress_bar=True
         ).tolist()
         
+        # 파일명 파싱하여 메타데이터 추출
+        parsed_info = parse_filename(filename)
+        
         # 메타데이터 준비
         ids = []
         metadatas = []
@@ -124,13 +128,27 @@ class RAGSystem:
         for i, chunk in enumerate(chunks):
             chunk_id = f"{file_id}_chunk_{i}"
             ids.append(chunk_id)
-            metadatas.append({
+            
+            # 기본 메타데이터
+            metadata = {
                 "file_id": file_id,
                 "filename": filename,
                 "page": chunk["page"],
                 "type": chunk["type"],
                 "chunk_index": i
-            })
+            }
+            
+            # 파싱된 정보 추가
+            if parsed_info["parsed"]:
+                metadata["date"] = parsed_info["date"]
+                metadata["doc_type"] = parsed_info["doc_type"]
+                metadata["doc_title"] = parsed_info["doc_title"]
+            else:
+                metadata["date"] = None
+                metadata["doc_type"] = None
+                metadata["doc_title"] = None
+            
+            metadatas.append(metadata)
         
         # ChromaDB에 저장
         self.collection.add(
@@ -145,10 +163,72 @@ class RAGSystem:
             "chunks_count": len(chunks)
         }
     
+    def get_document_count_by_type(self, doc_type: str) -> int:
+        """문서 유형별 고유 문서 개수 조회"""
+        try:
+            # 해당 문서 유형의 모든 문서 가져오기
+            results = self.collection.get(where={"doc_type": doc_type})
+            
+            if not results["ids"]:
+                return 0
+            
+            # 고유한 filename 개수 세기
+            unique_filenames = set()
+            for metadata in results["metadatas"]:
+                filename = metadata.get("filename")
+                if filename:
+                    unique_filenames.add(filename)
+            
+            return len(unique_filenames)
+        except Exception as e:
+            print(f"[RAG] 문서 유형별 개수 조회 오류: {e}")
+            return 0
+    
+    def get_all_document_types(self) -> Dict[str, int]:
+        """모든 문서 유형별 문서 개수 조회"""
+        try:
+            # 모든 문서 가져오기
+            all_docs = self.collection.get()
+            
+            # 문서 유형별로 그룹화
+            doc_type_counts = {}
+            for metadata in all_docs["metadatas"]:
+                doc_type = metadata.get("doc_type")
+                filename = metadata.get("filename")
+                
+                if doc_type and filename:
+                    if doc_type not in doc_type_counts:
+                        doc_type_counts[doc_type] = set()
+                    doc_type_counts[doc_type].add(filename)
+            
+            # 세트를 개수로 변환
+            return {doc_type: len(filenames) for doc_type, filenames in doc_type_counts.items()}
+        except Exception as e:
+            print(f"[RAG] 문서 유형 목록 조회 오류: {e}")
+            return {}
+    
     def query(self, query_text: str) -> Dict:
         """RAG 질의 처리"""
         import time
+        import re
         total_start = time.time()
+        
+        # 문서 유형 관련 질문 감지
+        doc_type_info = None
+        doc_type_mentioned = None
+        
+        # 질문에서 문서 유형 추출 시도
+        all_doc_types = self.get_all_document_types()
+        for doc_type in all_doc_types.keys():
+            if doc_type in query_text:
+                doc_type_mentioned = doc_type
+                doc_type_info = f"{doc_type} 문서는 총 {all_doc_types[doc_type]}개입니다."
+                print(f"[RAG] 문서 유형 감지: {doc_type}, 개수: {all_doc_types[doc_type]}")
+                break
+        
+        # "몇 개", "개수", "총" 등의 키워드로 문서 개수 질문 감지
+        count_keywords = ["몇 개", "개수", "총", "몇개", "개 있", "개 있나"]
+        is_count_query = any(keyword in query_text for keyword in count_keywords)
         
         try:
             print(f"[RAG] 쿼리 처리 시작: {query_text[:50]}...")
@@ -217,16 +297,25 @@ class RAGSystem:
         
         context_text = "\n\n---\n\n".join(contexts)
         
+        # 문서 유형별 개수 정보 추가
+        metadata_info = ""
+        if doc_type_info:
+            metadata_info = f"\n\n[문서 유형별 개수 정보]\n{doc_type_info}\n"
+        elif is_count_query and all_doc_types:
+            # 모든 문서 유형 개수 정보 제공
+            type_list = "\n".join([f"- {doc_type}: {count}개" for doc_type, count in sorted(all_doc_types.items())])
+            metadata_info = f"\n\n[문서 유형별 개수 정보]\n{type_list}\n"
+        
         # LLM 프롬프트 구성
         user_prompt = f"""다음 컨텍스트를 참고하여 질문에 답변하세요.
 
 [컨텍스트]
-{context_text}
+{context_text}{metadata_info}
 
 [질문]
 {query_text}
 
-위 컨텍스트에 없는 내용은 절대 답변하지 마세요. 답변 마지막에 [출처: 파일명, 페이지 X] 형식으로 소스를 명시하세요."""
+위 컨텍스트에 없는 내용은 절대 답변하지 마세요. 문서 유형별 개수 정보가 제공된 경우, 해당 정보를 정확히 사용하여 답변하세요. 답변 마지막에 [출처: 파일명, 페이지 X] 형식으로 소스를 명시하세요."""
         
         # Ollama로 답변 생성 (GPU)
         try:

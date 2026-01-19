@@ -3,6 +3,7 @@ import uuid
 import json
 from pathlib import Path
 from config import UPLOAD_DIR
+from .filename_parser import parse_filename
 
 class FileManager:
     """파일 업로드 및 다운로드 관리"""
@@ -43,10 +44,21 @@ class FileManager:
         metadata = {}
         for file_id, info in self.file_registry.items():
             if info["path"].exists():
-                metadata[file_id] = {
+                # 파일명 파싱
+                parsed_info = parse_filename(info["filename"])
+                
+                file_metadata = {
                     "original_filename": info["filename"],
                     "safe_filename": info["path"].name.split("_", 1)[1] if "_" in info["path"].name else info["path"].name
                 }
+                
+                # 파싱된 정보 추가
+                if parsed_info["parsed"]:
+                    file_metadata["date"] = parsed_info["date"]
+                    file_metadata["doc_type"] = parsed_info["doc_type"]
+                    file_metadata["doc_title"] = parsed_info["doc_title"]
+                
+                metadata[file_id] = file_metadata
         try:
             with open(self.metadata_file, 'w', encoding='utf-8') as f:
                 json.dump(metadata, f, ensure_ascii=False, indent=2)
