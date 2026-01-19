@@ -37,6 +37,17 @@ def upload_file():
         
         # 원본 파일명 저장 (secure_filename 적용 전)
         original_filename = file.filename
+        
+        # 중복 문서 확인
+        duplicate_check = rag_system.check_duplicate_document(original_filename)
+        if duplicate_check["is_duplicate"]:
+            return jsonify({
+                "error": "Duplicate document",
+                "message": duplicate_check["message"],
+                "existing_file_id": duplicate_check["existing_file_id"],
+                "is_duplicate": True
+            }), 409  # 409 Conflict
+        
         # 파일 저장용 안전한 파일명 생성
         safe_filename = secure_filename(file.filename)
         file_path = file_manager.save_file(file, safe_filename, original_filename)
@@ -82,7 +93,41 @@ def list_files():
         if date:
             files = [f for f in files if f.get("date") == date]
         
-        return jsonify({"files": files}), 200
+        # 통계 정보 계산
+        # 전체 문서 개수 (고유 파일명 기준)
+        total_count = len(files)
+        
+        # 문서 유형별 개수 계산
+        doc_type_counts = {}
+        for file in files:
+            file_doc_type = file.get("doc_type")
+            if file_doc_type:
+                if file_doc_type not in doc_type_counts:
+                    doc_type_counts[file_doc_type] = 0
+                doc_type_counts[file_doc_type] += 1
+        
+        # 벡터 DB에서도 문서 유형별 개수 가져오기 (더 정확한 정보)
+        try:
+            vector_db_stats = rag_system.get_all_document_types()
+            # 벡터 DB의 정보가 더 정확할 수 있으므로 우선 사용
+            # 하지만 파일 목록에 없는 문서 유형도 포함될 수 있으므로 병합
+            for doc_type, count in vector_db_stats.items():
+                if doc_type not in doc_type_counts or count > doc_type_counts[doc_type]:
+                    doc_type_counts[doc_type] = count
+        except Exception as e:
+            print(f"[API] 벡터 DB 통계 조회 오류: {e}")
+            # 벡터 DB 조회 실패 시 파일 목록 기반 통계만 사용
+        
+        # 통계 정보 구성
+        statistics = {
+            "total_count": total_count,
+            "by_doc_type": doc_type_counts
+        }
+        
+        return jsonify({
+            "files": files,
+            "statistics": statistics
+        }), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
