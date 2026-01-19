@@ -35,16 +35,18 @@ def upload_file():
         if file_ext not in ALLOWED_EXTENSIONS:
             return jsonify({"error": f"Unsupported file type: {file_ext}"}), 400
         
-        # 파일 저장
-        filename = secure_filename(file.filename)
-        file_path = file_manager.save_file(file, filename)
+        # 원본 파일명 저장 (secure_filename 적용 전)
+        original_filename = file.filename
+        # 파일 저장용 안전한 파일명 생성
+        safe_filename = secure_filename(file.filename)
+        file_path = file_manager.save_file(file, safe_filename, original_filename)
         
-        # 문서 인덱싱
-        result = rag_system.index_document(file_path, filename)
+        # 문서 인덱싱 (원본 파일명 사용)
+        result = rag_system.index_document(file_path, original_filename)
         
         return jsonify({
             "success": True,
-            "filename": filename,
+            "filename": original_filename,  # 원본 파일명 반환
             "file_id": result["file_id"],
             "chunks_count": result["chunks_count"]
         }), 200
@@ -116,14 +118,24 @@ def query():
 def delete_file(file_id):
     """파일 및 인덱스 삭제"""
     try:
-        # 벡터 DB에서 문서 삭제
-        rag_system.delete_document(file_id)
+        # 파일 경로 가져오기
+        file_path = file_manager.get_file_path(file_id)
+        
+        # 벡터 DB에서 문서 삭제 (파일 경로 기반)
+        if file_path:
+            rag_system.delete_document_by_path(file_path)
+        else:
+            # 파일 경로를 찾을 수 없으면 file_id로 직접 삭제 시도
+            rag_system.delete_document(file_id)
         
         # 파일 삭제
         file_manager.delete_file(file_id)
         
         return jsonify({"success": True}), 200
     except Exception as e:
+        import traceback
+        print(f"파일 삭제 오류: {e}")
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":

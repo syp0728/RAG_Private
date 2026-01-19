@@ -133,6 +133,9 @@
 .file-name {
   font-weight: 500;
   color: #333;
+  word-break: break-all;
+  max-width: 500px;
+  overflow-wrap: break-word;
 }
 
 .file-size {

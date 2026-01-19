@@ -160,14 +160,41 @@
   border-top: 1px solid #e0e0e0;
 }
 
+.chat-input-wrapper {
+  flex: 1;
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
 .chat-input {
   flex: 1;
   padding: 1rem 1.5rem;
+  padding-right: 3rem;
   border: 2px solid #e0e0e0;
   border-radius: 24px;
   font-size: 1rem;
   outline: none;
   transition: border-color 0.3s;
+}
+
+.chat-clear {
+  position: absolute;
+  right: 0.75rem;
+  background: transparent;
+  border: none;
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 0.5rem;
+  border-radius: 50%;
+  transition: background 0.3s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chat-clear:hover {
+  background: #f0f0f0;
 }
 
 .chat-input:focus {

@@ -1,13 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react'
 import './App.css'
 import ChatInterface from './components/ChatInterface'
+import ChatSidebar from './components/ChatSidebar'
 import FileManager from './components/FileManager'
 import api from './services/api'
+
+const CHATS_STORAGE_KEY = 'rag_chats'
 
 function App() {
   const [activeTab, setActiveTab] = useState('chat')
   const [files, setFiles] = useState([])
   const [backendStatus, setBackendStatus] = useState('checking') // 'online', 'offline', 'checking'
+  const [chats, setChats] = useState([])
+  const [currentChatId, setCurrentChatId] = useState(null)
 
   // 백엔드 연결 상태 확인
   const checkBackendStatus = async () => {
@@ -23,10 +28,114 @@ function App() {
     }
   }
 
+  // 채팅 목록 로드
+  const loadChats = () => {
+    try {
+      const saved = localStorage.getItem(CHATS_STORAGE_KEY)
+      if (saved) {
+        const parsedChats = JSON.parse(saved)
+        setChats(parsedChats)
+        // 첫 번째 채팅 선택 또는 가장 최근 채팅 선택
+        if (parsedChats.length > 0 && !currentChatId) {
+          const sortedChats = [...parsedChats].sort((a, b) => 
+            new Date(b.updatedAt) - new Date(a.updatedAt)
+          )
+          setCurrentChatId(sortedChats[0].id)
+        }
+      }
+    } catch (error) {
+      console.error('채팅 목록 로드 실패:', error)
+    }
+  }
+
+  // 채팅 목록 저장
+  const saveChats = (updatedChats) => {
+    try {
+      localStorage.setItem(CHATS_STORAGE_KEY, JSON.stringify(updatedChats))
+      setChats(updatedChats)
+    } catch (error) {
+      console.error('채팅 목록 저장 실패:', error)
+    }
+  }
+
+  // 새 채팅 생성
+  const handleNewChat = () => {
+    const newChat = {
+      id: Date.now().toString(),
+      title: '새 채팅',
+      messages: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      lastMessage: null
+    }
+    const updatedChats = [newChat, ...chats]
+    saveChats(updatedChats)
+    setCurrentChatId(newChat.id)
+  }
+
+  // 채팅 선택
+  const handleSelectChat = (chatId) => {
+    setCurrentChatId(chatId)
+  }
+
+  // 채팅 삭제
+  const handleDeleteChat = (chatId) => {
+    const updatedChats = chats.filter(chat => chat.id !== chatId)
+    saveChats(updatedChats)
+    
+    // 삭제된 채팅이 현재 채팅이면 다른 채팅 선택
+    if (currentChatId === chatId) {
+      if (updatedChats.length > 0) {
+        setCurrentChatId(updatedChats[0].id)
+      } else {
+        setCurrentChatId(null)
+      }
+    }
+  }
+
+  // 메시지 변경 처리
+  const handleMessagesChange = (newMessages) => {
+    if (!currentChatId) return
+    
+    const updatedChats = chats.map(chat => {
+      if (chat.id === currentChatId) {
+        const lastMessage = newMessages.length > 0 
+          ? (newMessages[newMessages.length - 1].content || '').substring(0, 50)
+          : null
+        
+        // 첫 메시지가 있으면 채팅 제목 업데이트
+        let title = chat.title
+        if (title === '새 채팅' && newMessages.length > 0) {
+          const firstUserMessage = newMessages.find(m => m.role === 'user')
+          if (firstUserMessage) {
+            title = firstUserMessage.content.substring(0, 30) + (firstUserMessage.content.length > 30 ? '...' : '')
+          }
+        }
+        
+        return {
+          ...chat,
+          messages: newMessages,
+          title,
+          lastMessage,
+          updatedAt: new Date().toISOString()
+        }
+      }
+      return chat
+    })
+    saveChats(updatedChats)
+  }
+
+  // 현재 채팅의 메시지 가져오기
+  const getCurrentMessages = () => {
+    const currentChat = chats.find(chat => chat.id === currentChatId)
+    return currentChat ? currentChat.messages : []
+  }
+
   useEffect(() => {
     // 초기 상태 확인
     checkBackendStatus()
     loadFiles()
+    loadChats()
 
     // 주기적으로 상태 확인 (5초마다)
     const statusInterval = setInterval(checkBackendStatus, 5000)
@@ -113,7 +222,30 @@ function App() {
 
       <main className="app-main">
         {activeTab === 'chat' && (
-          <ChatInterface backendStatus={backendStatus} />
+          <div className="chat-container">
+            <ChatSidebar
+              chats={chats}
+              currentChatId={currentChatId}
+              onSelectChat={handleSelectChat}
+              onNewChat={handleNewChat}
+              onDeleteChat={handleDeleteChat}
+            />
+            <div className="chat-main">
+              {currentChatId ? (
+                <ChatInterface
+                  backendStatus={backendStatus}
+                  chatId={currentChatId}
+                  messages={getCurrentMessages()}
+                  onMessagesChange={handleMessagesChange}
+                />
+              ) : (
+                <div className="chat-welcome">
+                  <h2>채팅을 시작하세요</h2>
+                  <p>새 채팅 버튼을 클릭하여 대화를 시작하세요.</p>
+                </div>
+              )}
+            </div>
+          </div>
         )}
         {activeTab === 'files' && (
           <FileManager

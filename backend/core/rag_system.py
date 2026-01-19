@@ -300,11 +300,53 @@ class RAGSystem:
         }
     
     def delete_document(self, file_id: str):
-        """벡터 DB에서 문서 삭제"""
+        """벡터 DB에서 문서 삭제 (file_id로 직접 삭제)"""
         try:
             existing = self.collection.get(where={"file_id": file_id})
             if existing["ids"]:
+                deleted_count = len(existing["ids"])
                 self.collection.delete(ids=existing["ids"])
+                print(f"[RAG] 문서 삭제 완료: file_id={file_id}, 삭제된 청크 수={deleted_count}")
+                return deleted_count
+            else:
+                print(f"[RAG] 삭제할 문서를 찾을 수 없음: file_id={file_id}")
+                return 0
         except Exception as e:
-            print(f"Error deleting document: {e}")
+            print(f"[RAG] 문서 삭제 오류: {e}")
+            import traceback
+            traceback.print_exc()
+            return 0
+    
+    def delete_document_by_path(self, file_path: Path):
+        """벡터 DB에서 문서 삭제 (파일 경로 기반)"""
+        try:
+            # 파일 경로 기반으로 file_id 생성
+            file_id = self._get_file_id(file_path)
+            print(f"[RAG] 파일 경로 기반 삭제 시도: {file_path}, file_id={file_id}")
+            
+            # file_id로 문서 검색 및 삭제
+            existing = self.collection.get(where={"file_id": file_id})
+            if existing["ids"]:
+                deleted_count = len(existing["ids"])
+                self.collection.delete(ids=existing["ids"])
+                print(f"[RAG] 문서 삭제 완료: file_id={file_id}, 삭제된 청크 수={deleted_count}")
+                return deleted_count
+            else:
+                # file_id로 찾지 못하면 filename으로도 시도
+                filename = file_path.name
+                print(f"[RAG] file_id로 찾지 못함, filename으로 재시도: {filename}")
+                existing = self.collection.get(where={"filename": filename})
+                if existing["ids"]:
+                    deleted_count = len(existing["ids"])
+                    self.collection.delete(ids=existing["ids"])
+                    print(f"[RAG] 문서 삭제 완료 (filename 기반): filename={filename}, 삭제된 청크 수={deleted_count}")
+                    return deleted_count
+                else:
+                    print(f"[RAG] 삭제할 문서를 찾을 수 없음: file_path={file_path}, file_id={file_id}, filename={filename}")
+                    return 0
+        except Exception as e:
+            print(f"[RAG] 문서 삭제 오류: {e}")
+            import traceback
+            traceback.print_exc()
+            return 0
 

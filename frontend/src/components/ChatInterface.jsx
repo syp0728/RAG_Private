@@ -2,8 +2,7 @@ import React, { useState, useRef, useEffect } from 'react'
 import './ChatInterface.css'
 import api from '../services/api'
 
-function ChatInterface({ backendStatus }) {
-  const [messages, setMessages] = useState([])
+function ChatInterface({ backendStatus, chatId, messages, onMessagesChange }) {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const messagesEndRef = useRef(null)
@@ -12,9 +11,10 @@ function ChatInterface({ backendStatus }) {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
+  // messages prop이 변경되면 스크롤
   useEffect(() => {
     scrollToBottom()
-  }, [messages])
+  }, [messages, chatId])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -22,20 +22,20 @@ function ChatInterface({ backendStatus }) {
     
     // 백엔드가 연결되지 않은 경우 경고
     if (backendStatus === 'offline') {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'assistant',
-          content: '⚠️ 백엔드 서버에 연결할 수 없습니다. 서버가 실행 중인지 확인해주세요.',
-          error: true
-        }
-      ])
+      const errorMessage = {
+        role: 'assistant',
+        content: '⚠️ 백엔드 서버에 연결할 수 없습니다. 서버가 실행 중인지 확인해주세요.',
+        error: true
+      }
+      onMessagesChange([...messages, errorMessage])
       return
     }
 
     const userMessage = input.trim()
     setInput('')
-    setMessages((prev) => [...prev, { role: 'user', content: userMessage }])
+    
+    const newUserMessage = { role: 'user', content: userMessage }
+    onMessagesChange([...messages, newUserMessage])
     setLoading(true)
 
     try {
@@ -45,24 +45,20 @@ function ChatInterface({ backendStatus }) {
 
       const { answer, sources, has_answer } = response.data
 
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'assistant',
-          content: answer,
-          sources: sources || [],
-          has_answer: has_answer
-        }
-      ])
+      const newAssistantMessage = {
+        role: 'assistant',
+        content: answer,
+        sources: sources || [],
+        has_answer: has_answer
+      }
+      onMessagesChange([...messages, newUserMessage, newAssistantMessage])
     } catch (error) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'assistant',
-          content: `오류가 발생했습니다: ${error.response?.data?.error || error.message}`,
-          error: true
-        }
-      ])
+      const errorMessage = {
+        role: 'assistant',
+        content: `오류가 발생했습니다: ${error.response?.data?.error || error.message}`,
+        error: true
+      }
+      onMessagesChange([...messages, newUserMessage, errorMessage])
     } finally {
       setLoading(false)
     }
@@ -142,14 +138,16 @@ function ChatInterface({ backendStatus }) {
       </div>
 
       <form className="chat-input-form" onSubmit={handleSubmit}>
-        <input
-          type="text"
-          className="chat-input"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder={backendStatus === 'offline' ? '백엔드 연결이 필요합니다...' : '질문을 입력하세요...'}
-          disabled={loading || backendStatus === 'offline'}
-        />
+        <div className="chat-input-wrapper">
+          <input
+            type="text"
+            className="chat-input"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder={backendStatus === 'offline' ? '백엔드 연결이 필요합니다...' : '질문을 입력하세요...'}
+            disabled={loading || backendStatus === 'offline'}
+          />
+        </div>
         <button
           type="submit"
           className="chat-submit"
