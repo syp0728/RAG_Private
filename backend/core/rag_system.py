@@ -60,31 +60,14 @@ class RAGSystem:
             print(f"⚠️ Ollama 연결 확인 실패: {e}")
             print(f"   Ollama가 실행 중인지 확인하세요: ollama serve")
         
-        # 시스템 프롬프트 (할루시네이션 방지 강화)
-        self.system_prompt = """너는 기업 내부 보안 문서를 분석하는 전문 AI 어시스턴트이다. 
-반드시 제공된 컨텍스트(Context)와 메타데이터만을 근거로 답변하며, 외부 지식 사용을 엄격히 금지한다.
+        # 시스템 프롬프트 (간소화 + 중복 처리)
+        self.system_prompt = """너는 기업 문서 검색 어시스턴트다.
 
-### 1. 검색 및 필터링 규칙 (Metadata Priority)
-- 질의에 파일명, 날짜(예: 250211), 문서 유형이 포함된 경우, 메타데이터가 정확히 일치하는 청크만 추출하여 답변한다.
-- 여러 문서가 검색되었더라도 질의와 무관한 파일의 내용은 무시한다.
-
-### 2. 답변 생성 원칙 (No-Hallucination)
-- 컨텍스트에 없는 정보는 추측하지 않고 "지식 베이스에 없는 내용입니다"라고만 답한다.
-- 추정, 의견, 상식 추가를 금지하며 오직 텍스트에 명시된 사실만 전달한다.
-- 동일한 정보가 여러 청크에 걸쳐 있다면 중복을 제거하고 하나로 병합하여 요약한다.
-
-### 3. 출력 형식 제한 (Plain Text Only)
-- **마크다운 금지**: 어떠한 경우에도 마크다운 문법(`**`, `#`, `-` 등)을 사용하지 않는다.
-- **순수 텍스트**: 모든 강조와 구조화는 줄바꿈과 띄어쓰기 등 순수 텍스트로만 표현한다.
-- **표 처리**: 표 데이터는 마크다운 대신 '항목: 내용' 형태의 텍스트 리스트로 변환하여 출력한다.
-
-### 4. 소스 표기 규격
-- 답변 하단에 [출처: 파일명, 페이지 X] 형식을 반드시 포함한다.
-- 여러 페이지를 참고한 경우 [출처: 파일명, 페이지 X, Y, Z]와 같이 병합 표기한다.
-
-### 답변 가이드라인:
-- 답변 (Plain Text)
-- [출처: 파일명, 페이지 번호]"""
+규칙:
+1. 제공된 컨텍스트만 사용하여 답변한다. 없는 정보는 "해당 정보가 없습니다"라고 답한다.
+2. 동일한 문서 제목, 참석자 명단, 항목이 여러 번 나오면 한 번만 요약하여 출력한다.
+3. 마크다운을 사용하지 않고 순수 텍스트로 답변한다.
+4. 답변 끝에 [출처: 파일명, 페이지] 형식으로 출처를 표기한다."""
     
     def _get_file_id(self, file_path: Path) -> str:
         """파일 ID 생성"""
@@ -148,18 +131,41 @@ class RAGSystem:
         """문서를 인덱싱하여 벡터 DB에 저장"""
         file_id = self._get_file_id(file_path)
         
+        print(f"\n{'='*60}")
+        print(f"[INDEX] 문서 인덱싱 시작: {filename}")
+        print(f"{'='*60}")
+        
         # 문서 처리 (Layout-aware)
+        print(f"[INDEX] 1단계: 문서 파싱 중...")
         chunks = self.doc_processor.extract_text_with_layout(file_path)
+        
+        # 표 관련 통계 로그
+        table_chunks = [c for c in chunks if c.get("type") == "table"]
+        text_chunks = [c for c in chunks if c.get("type") == "text"]
+        print(f"\n[INDEX] 파싱 결과:")
+        print(f"    - 총 청크 수: {len(chunks)}")
+        print(f"    - 텍스트 청크: {len(text_chunks)}개")
+        print(f"    - 표 청크: {len(table_chunks)}개")
+        
+        # 표 청크 상세 정보 출력
+        if table_chunks:
+            print(f"\n[INDEX] 감지된 표 상세 정보:")
+            for i, tc in enumerate(table_chunks):
+                page = tc.get("page", "?")
+                text_preview = tc.get("text", "")[:200].replace('\n', ' ')
+                print(f"    표 {i+1} (페이지 {page}): {text_preview}...")
         
         # 기존 문서 청크 삭제 (같은 파일 재업로드 시)
         try:
             existing = self.collection.get(where={"file_id": file_id})
             if existing["ids"]:
+                print(f"[INDEX] 기존 청크 {len(existing['ids'])}개 삭제")
                 self.collection.delete(ids=existing["ids"])
         except:
             pass
         
         # 임베딩 생성 (CPU)
+        print(f"\n[INDEX] 2단계: 임베딩 생성 중... ({len(chunks)}개 청크)")
         texts = [chunk["text"] for chunk in chunks]
         embeddings = self.embedding_model.encode(
             texts,
@@ -178,13 +184,20 @@ class RAGSystem:
             chunk_id = f"{file_id}_chunk_{i}"
             ids.append(chunk_id)
             
+            # 청크 메타데이터 추출 (document_processor에서 온 정보)
+            chunk_metadata = chunk.get("metadata", {})
+            has_table = chunk_metadata.get("has_table", False)
+            table_continued = chunk_metadata.get("table_continued", False)
+            
             # 기본 메타데이터
             metadata = {
                 "file_id": file_id,
                 "filename": filename,
                 "page": chunk["page"],
                 "type": chunk["type"],
-                "chunk_index": i
+                "chunk_index": i,
+                "has_table": has_table,
+                "table_continued": table_continued
             }
             
             # 파싱된 정보 추가
@@ -200,12 +213,24 @@ class RAGSystem:
             metadatas.append(metadata)
         
         # ChromaDB에 저장
+        print(f"\n[INDEX] 3단계: 벡터 DB 저장 중...")
         self.collection.add(
             ids=ids,
             embeddings=embeddings,
             documents=texts,
             metadatas=metadatas
         )
+        
+        # 저장된 표 청크 메타데이터 출력
+        saved_table_count = sum(1 for m in metadatas if m.get("type") == "table")
+        print(f"\n[INDEX] 저장 완료!")
+        print(f"    - 총 저장된 청크: {len(chunks)}개")
+        print(f"    - 표 청크 메타데이터:")
+        for i, m in enumerate(metadatas):
+            if m.get("type") == "table":
+                print(f"        페이지 {m.get('page')}: has_table={m.get('has_table', False)}, type={m.get('type')}")
+        
+        print(f"{'='*60}\n")
         
         return {
             "file_id": file_id,
@@ -256,25 +281,232 @@ class RAGSystem:
             print(f"[RAG] 문서 유형 목록 조회 오류: {e}")
             return {}
     
+    def _classify_intent(self, query_text: str) -> str:
+        """
+        LLM 기반 Intent Classifier (가벼운 프롬프트 사용)
+        
+        Returns:
+            "GLOBAL" - 전체 목록/개수 조회 (벡터 검색 생략)
+            "DETAIL" - 특정 내용 분석 (하이브리드 검색)
+        """
+        # 1단계: 빠른 규칙 기반 분류 (LLM 호출 최소화)
+        import re
+        
+        # GLOBAL 패턴 (명확한 경우만)
+        global_patterns = [
+            r"몇\s*(개|건)",           # "몇 개", "몇 건"
+            r"총\s*(몇|개|건|\d)",     # "총 몇개", "총 5개"
+            r"(등록|저장)된.*(문서|파일)",  # "등록된 문서"
+            r"(모든|전체).*(파일|문서).*목록",  # "모든 파일 목록"
+            r"(파일|문서)\s*목록",     # "파일 목록"
+            r"어떤\s*(문서|파일)",     # "어떤 문서가 있어"
+        ]
+        
+        for pattern in global_patterns:
+            if re.search(pattern, query_text):
+                print(f"[Intent] 규칙 기반 분류: GLOBAL (패턴: {pattern})")
+                return "GLOBAL"
+        
+        # DETAIL 패턴 (명확한 경우)
+        detail_patterns = [
+            r"\d{6}",                  # 날짜 코드 (예: 251111)
+            r"(내용|정보|기준|항목|금액|이름|성명)",  # 세부 정보 요청
+            r"(설명|분석|알려|말해).*줘",  # 분석 요청
+        ]
+        
+        for pattern in detail_patterns:
+            if re.search(pattern, query_text):
+                print(f"[Intent] 규칙 기반 분류: DETAIL (패턴: {pattern})")
+                return "DETAIL"
+        
+        # 2단계: 애매한 경우 LLM으로 분류
+        try:
+            if "http://" in self.ollama_base_url or "https://" in self.ollama_base_url:
+                host = self.ollama_base_url.replace("http://", "").replace("https://", "")
+            else:
+                host = self.ollama_base_url
+            
+            client = ollama.Client(host=host)
+            
+            classify_prompt = f"""질문을 분류하세요. 한 단어로만 답하세요.
+
+GLOBAL: 문서 개수, 목록, 현황 질문
+DETAIL: 문서 내용, 세부 정보 질문
+
+질문: {query_text}
+분류:"""
+            
+            response = client.chat(
+                model=self.ollama_model,
+                messages=[{"role": "user", "content": classify_prompt}],
+                options={"temperature": 0, "num_predict": 10}
+            )
+            
+            result = response.message.content.strip().upper()
+            
+            if "GLOBAL" in result:
+                print(f"[Intent] LLM 분류: GLOBAL")
+                return "GLOBAL"
+            else:
+                print(f"[Intent] LLM 분류: DETAIL")
+                return "DETAIL"
+                
+        except Exception as e:
+            print(f"[Intent] LLM 분류 실패, 기본값 DETAIL 사용: {e}")
+            return "DETAIL"
+    
+    def _handle_global_query(self, query_text: str, doc_type_mentioned: str = None) -> Dict:
+        """
+        GLOBAL Intent: 전체 현황 파악 (벡터 검색 생략, 메타데이터만 사용)
+        
+        LLM에게 파일 리스트를 전달하고 사실 기반 응답 생성
+        """
+        print(f"[RAG] GLOBAL 모드: 메타데이터 기반 응답")
+        
+        try:
+            # 모든 문서 메타데이터 수집
+            all_docs = self.collection.get()
+            
+            if not all_docs["metadatas"]:
+                return {
+                    "answer": "현재 등록된 문서가 없습니다.",
+                    "sources": [],
+                    "has_answer": True,
+                    "intent": "GLOBAL"
+                }
+            
+            # 유니크 파일 정보 추출
+            file_info = {}
+            for metadata in all_docs["metadatas"]:
+                filename = metadata.get("filename")
+                if not filename:
+                    continue
+                
+                if filename not in file_info:
+                    file_info[filename] = {
+                        "doc_type": metadata.get("doc_type", ""),
+                        "date": metadata.get("date", ""),
+                        "page_count": 0
+                    }
+                file_info[filename]["page_count"] += 1
+            
+            # 문서 유형별 그룹화
+            doc_type_groups = {}
+            for filename, info in file_info.items():
+                dt = info["doc_type"] or "(유형 없음)"
+                if dt not in doc_type_groups:
+                    doc_type_groups[dt] = []
+                doc_type_groups[dt].append(filename)
+            
+            # 파일 리스트 컨텍스트 생성
+            file_list_context = f"[등록된 문서 현황]\n총 문서 수: {len(file_info)}개\n\n"
+            
+            file_list_context += "[문서 유형별 현황]\n"
+            for dt, files in sorted(doc_type_groups.items()):
+                file_list_context += f"- {dt}: {len(files)}개\n"
+            
+            file_list_context += "\n[전체 파일 목록]\n"
+            for filename in sorted(file_info.keys()):
+                info = file_info[filename]
+                dt = info["doc_type"] or "(유형 없음)"
+                file_list_context += f"- {filename} (유형: {dt})\n"
+            
+            # LLM에게 파일 리스트 기반 응답 요청
+            try:
+                if "http://" in self.ollama_base_url or "https://" in self.ollama_base_url:
+                    host = self.ollama_base_url.replace("http://", "").replace("https://", "")
+                else:
+                    host = self.ollama_base_url
+                
+                client = ollama.Client(host=host)
+                
+                user_prompt = f"""다음은 현재 등록된 문서 목록입니다.
+
+{file_list_context}
+
+질문: {query_text}
+
+위 목록을 바탕으로 정확하게 답변하세요. 마크다운을 사용하지 마세요."""
+                
+                response = client.chat(
+                    model=self.ollama_model,
+                    messages=[
+                        {"role": "system", "content": self.system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    options={
+                        "temperature": 0.1,
+                        "num_predict": 1000
+                    }
+                )
+                
+                answer = response.message.content
+                
+            except Exception as e:
+                # LLM 실패 시 직접 응답 생성
+                print(f"[RAG] GLOBAL LLM 응답 실패, 직접 생성: {e}")
+                
+                if doc_type_mentioned and doc_type_mentioned in doc_type_groups:
+                    count = len(doc_type_groups[doc_type_mentioned])
+                    answer = f"{doc_type_mentioned} 문서는 총 {count}개입니다."
+                    if count <= 10:
+                        answer += "\n\n파일 목록:\n" + "\n".join([f"- {f}" for f in doc_type_groups[doc_type_mentioned]])
+                else:
+                    answer = f"등록된 문서는 총 {len(file_info)}개입니다.\n\n"
+                    answer += "문서 유형별 현황:\n"
+                    for dt, files in sorted(doc_type_groups.items()):
+                        answer += f"- {dt}: {len(files)}개\n"
+            
+            return {
+                "answer": answer,
+                "sources": [{"filename": f, "page": 1, "type": "metadata"} for f in list(file_info.keys())[:5]],
+                "has_answer": True,
+                "intent": "GLOBAL"
+            }
+            
+        except Exception as e:
+            print(f"[RAG] GLOBAL 처리 오류: {e}")
+            import traceback
+            traceback.print_exc()
+            return {
+                "answer": f"문서 현황 조회 중 오류가 발생했습니다: {str(e)}",
+                "sources": [],
+                "has_answer": False,
+                "intent": "GLOBAL"
+            }
+    
     def query(self, query_text: str) -> Dict:
-        """RAG 질의 처리"""
+        """RAG 질의 처리 (Intent 기반 동적 검색 전략)"""
         import time
         import re
         total_start = time.time()
         
-        # 문서 유형 관련 질문 감지
-        doc_type_info = None
-        doc_type_mentioned = None
-        doc_titles_info = None
+        print(f"[RAG] 쿼리 수신: {query_text}")
         
-        # 질문에서 문서 유형 추출 시도
+        # ========== Intent Classification ==========
+        intent = self._classify_intent(query_text)
+        
+        # 문서 유형 감지
+        doc_type_mentioned = None
         all_doc_types = self.get_all_document_types()
         for doc_type in all_doc_types.keys():
             if doc_type in query_text:
                 doc_type_mentioned = doc_type
-                doc_type_info = f"{doc_type} 문서는 총 {all_doc_types[doc_type]}개입니다."
-                print(f"[RAG] 문서 유형 감지: {doc_type}, 개수: {all_doc_types[doc_type]}")
+                print(f"[RAG] 문서 유형 감지: {doc_type}")
                 break
+        
+        # ========== GLOBAL Intent: 메타데이터 기반 응답 ==========
+        if intent == "GLOBAL":
+            return self._handle_global_query(query_text, doc_type_mentioned)
+        
+        # ========== DETAIL Intent: 하이브리드 검색 ==========
+        print(f"[RAG] DETAIL 모드: 하이브리드 검색 실행")
+        
+        # 기존 변수 초기화
+        doc_type_info = None
+        doc_titles_info = None
+        if doc_type_mentioned:
+            doc_type_info = f"{doc_type_mentioned} 문서는 총 {all_doc_types[doc_type_mentioned]}개입니다."
         
         # "몇 개", "개수", "총" 등의 키워드로 문서 개수 질문 감지
         count_keywords = ["몇 개", "개수", "총", "몇개", "개 있", "개 있나"]
@@ -590,8 +822,9 @@ class RAGSystem:
                                 ],
                                 options={
                                     "temperature": 0.1,
-                                    "top_p": 0.9,
-                                    "num_predict": 2000  # 전체 문서이므로 더 긴 답변 허용
+                                    "top_p": 0.85,
+                                    "num_predict": 2000,
+                                    "repeat_penalty": 1.2  # 반복 답변 방지
                                 }
                             )
                             llm_time = time.time() - llm_start
@@ -828,51 +1061,102 @@ class RAGSystem:
                 "index": i  # 원본 순서 유지용
             })
         
-        # 각 파일명당 하나의 대표 청크만 선택 (페이지 번호가 가장 작은 청크 또는 첫 번째 청크)
-        # 파일명 기반 정렬을 위해 먼저 파일명으로 정렬
-        sorted_filename_groups = sorted(filename_groups.items(), key=lambda x: x[0] if x[0] else '')
+        # [컨텍스트 확장] 모든 청크를 페이지 순으로 정렬하여 LLM에 전달
+        # 파일명별로 그룹화된 청크들을 풀어서 하나의 리스트로 만듦
+        all_chunks = []
+        for filename, chunks in filename_groups.items():
+            for chunk in chunks:
+                chunk["_sort_filename"] = filename or ""
+                # 페이지 번호 파싱
+                page = chunk["metadata"].get("page", 0)
+                try:
+                    chunk["_sort_page"] = int(page) if str(page).isdigit() else 0
+                except:
+                    chunk["_sort_page"] = 0
+                all_chunks.append(chunk)
+        
+        # 파일명 → 페이지 순으로 정렬
+        all_chunks.sort(key=lambda x: (x["_sort_filename"], x["_sort_page"]))
+        
+        # ========== De-duplication 강화 ==========
+        def calculate_text_similarity(text1: str, text2: str) -> float:
+            """텍스트 유사도 계산 (간단한 Jaccard 유사도)"""
+            if not text1 or not text2:
+                return 0.0
+            # 단어 단위로 분할
+            words1 = set(text1.split())
+            words2 = set(text2.split())
+            if not words1 or not words2:
+                return 0.0
+            intersection = len(words1 & words2)
+            union = len(words1 | words2)
+            return intersection / union if union > 0 else 0.0
+        
+        # 1단계: 파일명+페이지 기반 중복 제거
+        seen_file_page = set()
+        dedup_chunks_stage1 = []
+        for chunk in all_chunks:
+            key = (chunk["_sort_filename"], chunk["_sort_page"])
+            if key not in seen_file_page:
+                seen_file_page.add(key)
+                dedup_chunks_stage1.append(chunk)
+        
+        stage1_removed = len(all_chunks) - len(dedup_chunks_stage1)
+        if stage1_removed > 0:
+            print(f"[De-dup] 파일명+페이지 중복 제거: {stage1_removed}개 제거")
+        
+        # 2단계: 텍스트 유사도 기반 중복 제거 (90% 이상 유사)
+        SIMILARITY_THRESHOLD = 0.9
+        dedup_chunks_stage2 = []
+        
+        for chunk in dedup_chunks_stage1:
+            is_duplicate = False
+            chunk_text = chunk["doc_text"]
+            
+            for existing_chunk in dedup_chunks_stage2:
+                existing_text = existing_chunk["doc_text"]
+                similarity = calculate_text_similarity(chunk_text, existing_text)
+                
+                if similarity >= SIMILARITY_THRESHOLD:
+                    is_duplicate = True
+                    # 기존 청크에 페이지 정보 병합 (참조용)
+                    if "_merged_pages" not in existing_chunk:
+                        existing_chunk["_merged_pages"] = [existing_chunk["_sort_page"]]
+                    existing_chunk["_merged_pages"].append(chunk["_sort_page"])
+                    break
+            
+            if not is_duplicate:
+                dedup_chunks_stage2.append(chunk)
+        
+        stage2_removed = len(dedup_chunks_stage1) - len(dedup_chunks_stage2)
+        if stage2_removed > 0:
+            print(f"[De-dup] 텍스트 유사도 중복 제거: {stage2_removed}개 제거 (유사도 {SIMILARITY_THRESHOLD*100:.0f}% 이상)")
+        
+        # 최소 15개, 최대 30개 청크 선택
+        MIN_CHUNKS = 15
+        MAX_CHUNKS = 30
+        selected_chunks = dedup_chunks_stage2[:MAX_CHUNKS]
+        
+        # 청크가 부족하면 있는 만큼만 사용
+        if len(selected_chunks) < MIN_CHUNKS:
+            print(f"[RAG] 경고: 검색된 청크({len(selected_chunks)}개)가 최소 요구치({MIN_CHUNKS}개)보다 적음")
+        
+        print(f"[De-dup] 최종 청크 수: {len(selected_chunks)}개 (원본 {len(all_chunks)}개)")
         
         contexts = []
         sources = []
         unique_filenames = set()
         
-        for filename, chunks in sorted_filename_groups:
-            if not chunks:
-                continue
-            
-            # 페이지 번호가 있는 경우 가장 작은 페이지의 청크 선택, 없으면 첫 번째 청크 선택
-            best_chunk = None
-            min_page = float('inf')
-            
-            for chunk in chunks:
-                page = chunk["metadata"].get("page")
-                if page is not None:
-                    try:
-                        page_num = int(page) if isinstance(page, (int, float, str)) and str(page).isdigit() else float('inf')
-                        if page_num < min_page:
-                            min_page = page_num
-                            best_chunk = chunk
-                    except:
-                        pass
-            
-            # 페이지 번호가 없거나 파싱 실패한 경우 첫 번째 청크 선택
-            if best_chunk is None:
-                best_chunk = chunks[0]
-            
-            # 선택된 청크의 메타데이터 정보 추출
-            metadata = best_chunk["metadata"]
-            doc_text = best_chunk["doc_text"]
+        for chunk in selected_chunks:
+            metadata = chunk["metadata"]
+            doc_text = chunk["doc_text"]
             filename = metadata.get("filename", "알 수 없음")
             page = metadata.get("page", "알 수 없음")
             doc_type = metadata.get("doc_type")
             doc_title = metadata.get("doc_title")
             date = metadata.get("date")
             
-            # 중복 제거: 이미 추가된 파일명이면 건너뛰기
-            if filename in unique_filenames:
-                continue
-            
-            unique_filenames.add(filename)
+            unique_filenames.add(filename)  # 통계용
             
             # 컨텍스트에 메타데이터 정보 포함
             metadata_str = f"[문서 정보]\n"
@@ -897,9 +1181,7 @@ class RAGSystem:
         if filtered_count > 0:
             print(f"[RAG] 파일명 필터링 완료: {filtered_count}개 청크 제외")
         
-        duplicate_removed = sum(len(chunks) - 1 for chunks in filename_groups.values() if len(chunks) > 1)
-        if duplicate_removed > 0:
-            print(f"[RAG] 파일명 중복 제거 완료: {duplicate_removed}개 중복 청크 제외, {len(contexts)}개 유니크 파일 사용")
+        print(f"[RAG] 컨텍스트 구성 완료: {len(contexts)}개 청크, {len(unique_filenames)}개 파일에서 추출")
         
         if not contexts:
             print(f"[RAG] 경고: 파일명 필터링 후 사용 가능한 청크가 없음")
@@ -978,8 +1260,9 @@ class RAGSystem:
                 ],
                 options={
                     "temperature": 0.1,
-                    "top_p": 0.9,
-                    "num_predict": 1000
+                    "top_p": 0.85,
+                    "num_predict": 1500,
+                    "repeat_penalty": 1.2  # 반복 답변 방지
                 }
             )
             llm_time = time.time() - llm_start
@@ -1037,6 +1320,49 @@ class RAGSystem:
             else:
                 print(f"[RAG] 삭제할 문서를 찾을 수 없음: file_id={file_id}")
                 return 0
+        except Exception as e:
+            print(f"[RAG] 문서 삭제 오류: {e}")
+            import traceback
+            traceback.print_exc()
+            return 0
+    
+    def delete_document_by_filename(self, filename: str):
+        """벡터 DB에서 문서 삭제 (원본 파일명 기반)"""
+        try:
+            if not filename:
+                print(f"[RAG] 삭제 실패: 파일명이 비어있음")
+                return 0
+            
+            print(f"[RAG] 파일명 기반 삭제 시도: {filename}")
+            
+            # 정확한 파일명 매칭
+            existing = self.collection.get(where={"filename": filename})
+            
+            if existing["ids"]:
+                deleted_count = len(existing["ids"])
+                self.collection.delete(ids=existing["ids"])
+                print(f"[RAG] 문서 삭제 완료 (filename): {filename}, 삭제된 청크 수={deleted_count}")
+                return deleted_count
+            else:
+                # 부분 매칭 시도 (안전한 파일명으로 저장된 경우)
+                print(f"[RAG] 정확한 매칭 실패, 전체 검색으로 재시도")
+                all_docs = self.collection.get()
+                
+                ids_to_delete = []
+                for i, metadata in enumerate(all_docs["metadatas"]):
+                    doc_filename = metadata.get("filename", "")
+                    # 파일명이 포함되어 있거나, 일부가 매칭되면 삭제 대상
+                    if doc_filename == filename or filename in doc_filename or doc_filename in filename:
+                        ids_to_delete.append(all_docs["ids"][i])
+                
+                if ids_to_delete:
+                    self.collection.delete(ids=ids_to_delete)
+                    print(f"[RAG] 문서 삭제 완료 (부분 매칭): {filename}, 삭제된 청크 수={len(ids_to_delete)}")
+                    return len(ids_to_delete)
+                else:
+                    print(f"[RAG] 삭제할 문서를 찾을 수 없음: filename={filename}")
+                    return 0
+                    
         except Exception as e:
             print(f"[RAG] 문서 삭제 오류: {e}")
             import traceback
