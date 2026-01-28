@@ -10,9 +10,31 @@
   border-bottom: 1px solid #e0e0e0;
 }
 
+.file-manager-title-section {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
 .file-manager-header h2 {
-  margin: 0 0 1rem 0;
+  margin: 0;
   color: #333;
+}
+
+.file-statistics {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.stat-total {
+  padding: 0.5rem 1rem;
+  background: #f0f4ff;
+  color: #667eea;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-weight: 600;
 }
 
 .file-filters {
@@ -220,5 +242,50 @@
 
 .action-button.delete:hover {
   filter: brightness(0.8);
+}
+
+/* 확장자 배지 스타일 */
+.file-extension {
+  text-align: center;
+}
+
+.extension-badge {
+  display: inline-block;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.ext-pdf {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.ext-docx {
+  background: #dbeafe;
+  color: #2563eb;
+}
+
+.ext-xlsx {
+  background: #dcfce7;
+  color: #16a34a;
+}
+
+.ext-txt {
+  background: #f3f4f6;
+  color: #4b5563;
+}
+
+.ext-img {
+  background: #fef3c7;
+  color: #d97706;
+}
+
+.ext-other {
+  background: #e5e7eb;
+  color: #6b7280;
 }
 

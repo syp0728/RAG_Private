@@ -1,15 +1,15 @@
 import React, { useState, useRef } from 'react'
 import './FileManager.css'
 
-function FileManager({ files, onUpload, onDelete, onDownload, backendStatus }) {
+function FileManager({ files, statistics, onUpload, onDelete, onDownload, backendStatus }) {
   const [uploading, setUploading] = useState(false)
   const [uploadStatus, setUploadStatus] = useState(null)
   const [filterDocType, setFilterDocType] = useState('')
   const [filterDate, setFilterDate] = useState('')
   const fileInputRef = useRef(null)
   
-  // 문서 유형 목록 추출
-  const docTypes = [...new Set(files.map(f => f.doc_type).filter(Boolean))].sort()
+  // 문서 유형 목록 추출 (통계 정보 사용)
+  const docTypes = Object.keys(statistics.by_doc_type || {}).sort()
   
   // 날짜 목록 추출
   const dates = [...new Set(files.map(f => f.date).filter(Boolean))].sort().reverse()
@@ -50,10 +50,33 @@ function FileManager({ files, onUpload, onDelete, onDownload, backendStatus }) {
     return (bytes / (1024 * 1024)).toFixed(2) + ' MB'
   }
 
+  const getFileExtension = (filename) => {
+    if (!filename) return '-'
+    const ext = filename.split('.').pop()?.toUpperCase()
+    return ext || '-'
+  }
+
+  const getExtensionClass = (filename) => {
+    const ext = filename?.split('.').pop()?.toLowerCase()
+    switch (ext) {
+      case 'pdf': return 'ext-pdf'
+      case 'docx': case 'doc': return 'ext-docx'
+      case 'xlsx': case 'xls': return 'ext-xlsx'
+      case 'txt': case 'md': return 'ext-txt'
+      case 'png': case 'jpg': case 'jpeg': case 'gif': return 'ext-img'
+      default: return 'ext-other'
+    }
+  }
+
   return (
     <div className="file-manager">
       <div className="file-manager-header">
-        <h2>파일 관리</h2>
+        <div className="file-manager-title-section">
+          <h2>파일 관리</h2>
+          <div className="file-statistics">
+            <span className="stat-total">전체 문서: {statistics.total_count || files.length}개</span>
+          </div>
+        </div>
         <div className="file-filters">
           <select
             className="filter-select"
@@ -62,7 +85,9 @@ function FileManager({ files, onUpload, onDelete, onDownload, backendStatus }) {
           >
             <option value="">전체 문서 유형</option>
             {docTypes.map(type => (
-              <option key={type} value={type}>{type}</option>
+              <option key={type} value={type}>
+                {type}({statistics.by_doc_type[type] || 0})
+              </option>
             ))}
           </select>
           <select
@@ -96,7 +121,7 @@ function FileManager({ files, onUpload, onDelete, onDownload, backendStatus }) {
             id="file-upload"
             className="file-input"
             onChange={handleFileSelect}
-            accept=".pdf,.docx,.txt,.md"
+            accept=".pdf,.docx,.txt,.md,.xlsx,.xls,.png,.jpg,.jpeg,.gif,.bmp,.tiff,.tif,.webp"
             disabled={uploading || backendStatus === 'offline'}
           />
           <label
@@ -122,7 +147,7 @@ function FileManager({ files, onUpload, onDelete, onDownload, backendStatus }) {
             <p>📄 {files.length === 0 ? '업로드된 파일이 없습니다.' : '필터 조건에 맞는 파일이 없습니다.'}</p>
             <p className="file-hint">
               {files.length === 0 
-                ? 'PDF, DOCX, TXT, MD 형식의 파일을 업로드할 수 있습니다.'
+                ? 'PDF, DOCX, TXT, MD, XLSX, XLS 형식의 파일을 업로드할 수 있습니다.'
                 : '다른 필터 조건을 선택해보세요.'}
             </p>
           </div>
@@ -133,6 +158,7 @@ function FileManager({ files, onUpload, onDelete, onDownload, backendStatus }) {
                 <th>날짜</th>
                 <th>문서 유형</th>
                 <th>문서 제목</th>
+                <th>확장자</th>
                 <th>크기</th>
                 <th>작업</th>
               </tr>
@@ -153,6 +179,11 @@ function FileManager({ files, onUpload, onDelete, onDownload, backendStatus }) {
                         ({file.filename})
                       </span>
                     )}
+                  </td>
+                  <td className="file-extension">
+                    <span className={`extension-badge ${getExtensionClass(file.filename)}`}>
+                      {getFileExtension(file.filename)}
+                    </span>
                   </td>
                   <td className="file-size">{formatFileSize(file.size)}</td>
                   <td className="file-actions">

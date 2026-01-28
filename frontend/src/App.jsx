@@ -10,6 +10,7 @@ const CHATS_STORAGE_KEY = 'rag_chats'
 function App() {
   const [activeTab, setActiveTab] = useState('chat')
   const [files, setFiles] = useState([])
+  const [statistics, setStatistics] = useState({ total_count: 0, by_doc_type: {} })
   const [backendStatus, setBackendStatus] = useState('checking') // 'online', 'offline', 'checking'
   const [chats, setChats] = useState([])
   const [currentChatId, setCurrentChatId] = useState(null)
@@ -149,6 +150,7 @@ function App() {
     try {
       const response = await api.get('/files')
       setFiles(response.data.files || [])
+      setStatistics(response.data.statistics || { total_count: 0, by_doc_type: {} })
     } catch (error) {
       console.error('파일 목록 로드 실패:', error)
     }
@@ -250,6 +252,7 @@ function App() {
         {activeTab === 'files' && (
           <FileManager
             files={files}
+            statistics={statistics}
             onUpload={handleFileUpload}
             onDelete={handleFileDelete}
             onDownload={(fileId) => {
