@@ -96,6 +96,7 @@ Frontend는 `http://localhost:3000` (또는 다른 포트)에서 실행됩니다
 ## 문서
 
 - 📖 [전체 문서](docs/README.md)
+- 📋 [기술 명세서](docs/TECHNICAL_SPEC.md) ⭐ **NEW**
 - 🚀 [빠른 시작 가이드](docs/QUICKSTART.md)
 - 📦 [설치 가이드](docs/INSTALL.md)
 - ⚙️ [Ollama 설정](docs/OLLAMA_SETUP.md)
