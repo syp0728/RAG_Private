@@ -243,67 +243,240 @@ data/chroma_db/
 
 ---
 
-## 5. 운영 및 유지보수 (Operation)
+## 5. 운영 및 유지보수 (Operation & Maintenance)
 
-### 5.1 실행 방법
+### 5.1 환경 설정 및 실행 (Setup)
+
+#### 사전 요구사항
+
+| 구성요소 | 버전 | 설치 확인 명령어 |
+|---------|------|-----------------|
+| Python | 3.10 ~ 3.11 | `python --version` |
+| Node.js | 18.x 이상 | `node --version` |
+| Ollama | 최신 버전 | `ollama --version` |
+| NVIDIA Driver | 535+ (GPU 사용 시) | `nvidia-smi` |
 
 #### 초기 설정 (최초 1회)
+
+**1단계: Ollama 모델 다운로드**
 ```powershell
-# 1. Ollama 모델 다운로드
+# LLM 모델 다운로드 (약 4.7GB)
 ollama pull llama3.1:8b-instruct-q4_K_M
 
-# 2. Backend 설정
+# 다운로드 확인
+ollama list
+```
+
+**2단계: 백엔드 설정**
+```powershell
 cd backend
+
+# Python 3.11 가상환경 생성 (3.14는 호환성 문제 있음)
 python -m venv venv311
 .\venv311\Scripts\Activate.ps1
+
+# 의존성 설치
 pip install -r requirements.txt
 
-# 3. Frontend 설정
-cd ../frontend
+# 임베딩 모델 사전 다운로드 (약 2.2GB, 선택사항)
+python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('BAAI/bge-m3')"
+```
+
+**3단계: 프론트엔드 설정**
+```powershell
+cd frontend
 npm install
 ```
 
 #### 일상 실행
+
 ```powershell
-# 터미널 1: Backend (Ollama 자동 시작)
+# 터미널 1: 백엔드 실행 (Ollama 자동 시작)
 cd backend
 .\venv311\Scripts\Activate.ps1
-python -u app.py
+python -u app.py                    # -u 플래그: 실시간 로그 출력
 
-# 터미널 2: Frontend
+# 터미널 2: 프론트엔드 실행
 cd frontend
 npm run dev
 ```
 
-### 5.2 디버깅 가이드
+**접속 URL**
+- 프론트엔드: http://localhost:5173
+- 백엔드 API: http://localhost:5000
+- Ollama: http://localhost:11434
 
-#### 자주 발생하는 오류 및 해결책
+---
 
-| 오류 | 원인 | 해결책 |
-|------|------|--------|
-| `capture() takes 1 positional argument` | ChromaDB 텔레메트리 버그 | 무시해도 됨 (기능에 영향 없음) |
-| `Ollama 연결 실패` | Ollama 서버 미실행 | `ollama serve` 실행 또는 백엔드 재시작 |
-| `cp949 codec can't encode` | Windows 인코딩 문제 | `python -u app.py` 사용 |
-| `None metadata value` | 메타데이터 파싱 실패 | 파일명 형식 확인 (YYMMDD_유형_제목) |
-| LLM 응답 지연 | GPU 메모리 부족 | 다른 GPU 사용 프로그램 종료 |
+### 5.2 주요 디버깅 가이드 (Troubleshooting)
 
-#### 체크리스트: LLM 응답 품질 저하 시
-1. [ ] 벡터 DB에 해당 문서가 제대로 인덱싱되었는지 확인
-   ```powershell
-   python check_vector_db.py
-   ```
-2. [ ] 검색 결과가 질문과 관련 있는지 로그 확인
-3. [ ] 시스템 프롬프트가 적절한지 검토
-4. [ ] 청크 크기/오버랩 조정 검토 (현재: 1000자/200자)
+#### A. 시작 시 발생하는 오류
 
-### 5.3 알려진 이슈 및 한계점
+| 오류 메시지 | 원인 | 해결 방법 |
+|------------|------|----------|
+| `Failed to send telemetry event: capture() takes 1 positional argument` | ChromaDB 내부 텔레메트리 버그 | ⚠️ **무시 가능** - 시스템 동작에 영향 없음 |
+| `pydantic.v1.errors.ConfigError: unable to infer type` | Python 3.14와 ChromaDB 비호환 | Python 3.11 가상환경 사용 (`.\venv311\Scripts\python.exe`) |
+| `Ollama 연결 실패` | Ollama 서버 미실행 | 백엔드 재시작 (자동 실행) 또는 수동으로 `ollama serve` |
+| `Port 5000 already in use` | 이전 프로세스가 포트 점유 | `taskkill /F /IM python.exe` 후 재시작 |
 
-| 이슈 | 상세 | 현재 대응 | 향후 계획 |
-|------|------|----------|----------|
-| 엑셀 복잡 병합 셀 | 3단계 이상 병합 시 인식 오류 가능 | Fill-down 로직 적용 | 병합 셀 좌표 직접 활용 |
-| 이미지 OCR 속도 | 페이지당 5-10초 소요 | OpenCV 선처리로 필요 시만 OCR | GPU 가속 OCR 검토 |
-| 대용량 문서 | 100페이지 이상 문서 처리 지연 | 청크 배치 처리 | 비동기 처리 도입 |
-| 손글씨 인식 | EasyOCR 손글씨 인식률 낮음 | - | TrOCR 등 전문 모델 검토 |
+#### B. 응답 지연 (Slow Response)
+
+**증상**: LLM 응답이 10초 이상 소요
+
+**진단 체크리스트**:
+```powershell
+# 1. GPU 메모리 확인
+nvidia-smi
+
+# 2. Ollama GPU 사용 확인
+$env:OLLAMA_DEBUG=1
+ollama run llama3.1:8b-instruct-q4_K_M "test"
+# 출력에 "GPU" 또는 "CUDA" 포함되어야 함
+
+# 3. 다른 GPU 사용 프로세스 확인
+nvidia-smi --query-compute-apps=pid,name,used_memory --format=csv
+```
+
+**해결 방법**:
+| 원인 | 해결책 |
+|------|--------|
+| GPU 메모리 부족 | 다른 GPU 사용 프로그램(게임, 크롬 등) 종료 |
+| CPU 모드로 실행 중 | Ollama 재설치, CUDA 드라이버 확인 |
+| 청크 수가 너무 많음 | `config.py`에서 `MAX_CONTEXT_COUNT` 줄이기 |
+
+#### C. 파일 인식 실패
+
+**증상**: 업로드 후 문서 내용이 검색되지 않음
+
+**진단 방법**:
+```powershell
+# 벡터 DB 상태 확인
+cd backend
+.\venv311\Scripts\Activate.ps1
+python check_vector_db.py
+
+# 파일 시스템과 벡터 DB 동기화 확인
+python sync_check.py
+```
+
+**표 데이터 누락 시 확인 사항**:
+```
+터미널 로그에서 확인:
+[DocumentProcessor] 표 감지됨! pdfplumber로 표 추출 모드 활성화
+[pdfplumber TABLE] 페이지 1, 표 1 (10행 x 5열)
+    | 항목 | 금액 | 비고 |
+    | --- | --- | --- |
+    ...
+```
+
+| 로그 메시지 | 의미 | 조치 |
+|------------|------|------|
+| `표 없음, PyPDF2로 텍스트 추출` | 표가 감지되지 않음 | 이미지 표일 가능성 → OpenCV 확인 |
+| `OpenCV 표 선 감지 실패` | 선이 없는 표 | EasyOCR 좌표 기반 추론 필요 |
+| `EasyOCR 모델 로딩 중...` | OCR 첫 실행 | 정상, 2-3분 소요 |
+
+#### D. LLM 답변 품질 저하
+
+**증상**: 엉뚱한 답변, 같은 내용 반복, 출처 오류
+
+**진단 체크리스트**:
+
+| 단계 | 확인 항목 | 확인 방법 |
+|------|----------|----------|
+| 1 | 벡터 DB 인덱싱 | `python check_vector_db.py`로 청크 수 확인 |
+| 2 | 검색 결과 | 터미널에서 `[RAG] 검색 결과: X개 문서 발견` 로그 확인 |
+| 3 | 중복 제거 | `[De-dup] 최종 청크 수: X개` 로그 확인 |
+| 4 | 프롬프트 | `rag_system.py`의 `self.system_prompt` 검토 |
+
+**튜닝 가능한 파라미터** (`config.py`):
+```python
+# 검색 범위
+TOP_K_RESULTS = 40           # 1차 검색 결과 수
+RERANK_TOP_K = 25            # Re-Ranking 후 결과 수
+
+# 컨텍스트 구성
+MIN_CONTEXT_COUNT = 15       # 최소 컨텍스트 수
+MAX_CONTEXT_COUNT = 30       # 최대 컨텍스트 수
+MAX_CHUNKS_PER_FILE = 15     # 파일당 최대 청크 수
+
+# 하이브리드 검색 가중치
+VECTOR_WEIGHT = 0.4          # 의미 검색 (낮추면 키워드 강조)
+BM25_WEIGHT = 0.6            # 키워드 검색 (높이면 고유명사에 강함)
+```
+
+---
+
+### 5.3 유지보수 스크립트
+
+#### 벡터 DB 상태 확인
+```powershell
+cd backend
+.\venv311\Scripts\Activate.ps1
+
+# 전체 문서 현황
+python check_vector_db.py
+
+# 파일 시스템과 동기화 확인
+python sync_check.py
+
+# 고아 데이터 정리 (파일은 삭제됐는데 DB에 남아있는 경우)
+python sync_check.py --cleanup
+```
+
+#### 문서 재인덱싱
+```powershell
+# 특정 문서 재인덱싱 (수동)
+python reindex_documents.py
+
+# 전체 벡터 DB 초기화 (주의: 모든 데이터 삭제)
+Remove-Item -Recurse -Force ..\data\chroma_db\*
+# 이후 모든 파일 재업로드 필요
+```
+
+#### 로그 레벨 조정
+```python
+# app.py 수정
+import logging
+logging.basicConfig(level=logging.DEBUG)  # DEBUG, INFO, WARNING, ERROR
+```
+
+---
+
+### 5.4 알려진 이슈 및 한계점
+
+| 이슈 | 상세 설명 | 현재 대응 | 향후 개선 계획 |
+|------|----------|----------|--------------|
+| **엑셀 복잡 병합 셀** | 3단계 이상 병합 시 인식 오류 가능 | Column-first Fill-down 적용 | 병합 셀 좌표 직접 활용 |
+| **이미지 OCR 속도** | 페이지당 5-10초 소요 | OpenCV 선처리로 필요 시만 OCR | GPU 가속 OCR (Tesseract-GPU) |
+| **대용량 문서** | 100페이지 이상 처리 지연 | 청크 배치 처리 | 비동기 처리 + 프로그레스 바 |
+| **손글씨 인식** | EasyOCR 손글씨 인식률 60% 미만 | - | TrOCR 등 전문 모델 검토 |
+| **한글 PDF 깨짐** | 일부 PDF 인코딩 문제 | pdfplumber fallback | 추가 폰트 매핑 |
+| **chunk_by_title 미사용** | unstructured의 섹션 기반 청킹 비활성 | 단순 크기 기반 청킹 | 섹션 인식 청킹 도입 |
+
+---
+
+### 5.5 백업 및 복구
+
+#### 백업 대상
+```
+data/
+├── uploads/           # ⭐ 원본 파일 (필수 백업)
+├── chroma_db/         # ⭐ 벡터 DB (재인덱싱으로 복구 가능)
+└── .file_metadata.json  # 파일 메타데이터
+
+models/
+└── sentence-transformers/  # 임베딩 모델 (재다운로드 가능)
+```
+
+#### 백업 스크립트
+```powershell
+# 백업
+$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+Compress-Archive -Path ".\data\uploads", ".\data\chroma_db" -DestinationPath ".\backup\rag_backup_$timestamp.zip"
+
+# 복구
+Expand-Archive -Path ".\backup\rag_backup_XXXXXXXX.zip" -DestinationPath ".\data\"
+```
 
 ---
 
