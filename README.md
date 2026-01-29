@@ -95,9 +95,12 @@ Frontend는 `http://localhost:3000` (또는 다른 포트)에서 실행됩니다
 
 ## 문서
 
-- 📦 [**설치 가이드 (처음부터 끝까지)**](docs/INSTALLATION_GUIDE.md) ⭐ **START HERE**
-- 📋 [기술 명세서](docs/TECHNICAL_SPEC.md)
-- 🔄 [파이프라인 상세](docs/PIPELINE.md)
+| 문서 | 설명 | 대상 |
+|------|------|------|
+| 📦 [**설치 가이드**](docs/INSTALLATION_GUIDE.md) | 소프트웨어 설치 + 프로젝트 실행 | 소스코드가 있을 때 |
+| 🏗️ [**스캐폴딩 가이드**](docs/SCAFFOLDING_GUIDE.md) | 처음부터 직접 코드 작성 | 소스코드가 없을 때 |
+| 📋 [기술 명세서](docs/TECHNICAL_SPEC.md) | 아키텍처, 알고리즘, 운영 | 상세 기술 이해 |
+| 🔄 [파이프라인 상세](docs/PIPELINE.md) | 문서 처리 / 검색 흐름 | 동작 원리 이해 |
 
 ## 주요 기능
 
